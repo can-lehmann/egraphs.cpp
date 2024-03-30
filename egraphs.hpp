@@ -170,74 +170,58 @@ namespace egraphs {
     private:
       Node* _root = nullptr;
     public:
-      EClass(Node* node): _root(node->find()) {}
+      EClass(Node* node): _root(node->root()) {}
       
       const Node* root() const { return _root; }
       
-      iterator begin() { return iterator(_root->down, _root->down); }
-      iterator end() { return iterator(_root->down, nullptr); }
+      iterator begin() { return iterator(_root->_down, _root->_down); }
+      iterator end() { return iterator(_root->_down, nullptr); }
     };
     
     class Node {
     private:
       friend EGraph<NodeData>;
       
-      NodeData data;
+      NodeData _data;
       
       // Union Find
-      size_t rank = 0;
-      Node* up = nullptr;
+      size_t _rank = 0;
+      Node* _up = nullptr;
       
       // If this node is a root node, uses contains a cyclic linked
       // list of all users of the node and down contains a cyclic
       // linked list of all nodes in the equivalence class.
-      Use* uses = nullptr;
-      Down* down;
+      Use* _uses = nullptr;
+      Down* _down;
       
       // Hashcons
-      Node* next_bucket = nullptr;
-      Node** prev_bucket = nullptr;
+      Node* _next_bucket = nullptr;
+      Node** _prev_bucket = nullptr;
       
       // The children of the node are stored in a flexible array member
       // directly after this structure.
-      size_t child_count = 0;
-      Node* children[];
+      size_t _child_count = 0;
+      Node* _children[];
       
-      Node(const NodeData& _data,
-           Down* _down,
-           size_t _child_count,
-           Node** _children):
-          data(_data),
-          down(_down),
-          child_count(_child_count) {
+      Node(const NodeData& data,
+           Down* down,
+           size_t child_count,
+           Node** children):
+          _data(data),
+          _down(down),
+          _child_count(child_count) {
         
-        std::copy(_children, _children + _child_count, children);
+        std::copy(children, children + child_count, _children);
       }
       
-      void insert_uses(Use* _uses) {
-        if (uses == nullptr) {
-          uses = _uses;
+      void insert_uses(Use* uses) {
+        if (_uses == nullptr) {
+          _uses = uses;
         } else {
-          Use* temp = uses->next;
-          uses->next = _uses->next;
-          _uses->next = temp;
+          Use* temp = _uses->next;
+          _uses->next = uses->next;
+          uses->next = temp;
         }
-      }
-      
-      // Finds the root node in the union find.
-      // Performs path compression.
-      Node* find() {
-        Node* root = this;
-        while (root->up != nullptr) {
-          root = root->up;
-        }
-        Node* cur = this;
-        while (cur->up != nullptr) {
-          Node* old_up = cur->up;
-          cur->up = root;
-          cur = old_up;
-        }
-        return root;
       }
       
       // Merges (union) equivalence classes.
@@ -245,24 +229,24 @@ namespace egraphs {
       // The rank of `this` must less or equal to the rank of `other`.
       CycleRange<Use> merge_roots(Node* other) {
         assert(this != other);
-        assert(rank <= other->rank);
-        assert(up == nullptr);
-        assert(other->up == nullptr);
+        assert(_rank <= other->_rank);
+        assert(_up == nullptr);
+        assert(other->_up == nullptr);
         
-        up = other;
-        if (rank == other->rank) {
-          other->rank++;
+        _up = other;
+        if (_rank == other->_rank) {
+          other->_rank++;
         }
         
-        Down* temp = other->down->next;
-        other->down->next = down->next;
-        down->next = temp;
-        down = nullptr;
+        Down* temp = other->_down->next;
+        other->_down->next = _down->next;
+        _down->next = temp;
+        _down = nullptr;
         
-        if (uses != nullptr) {
-          CycleRange<Use> range(uses->next, uses);
-          other->insert_uses(uses);
-          uses = nullptr;
+        if (_uses != nullptr) {
+          CycleRange<Use> range(_uses->next, _uses);
+          other->insert_uses(_uses);
+          _uses = nullptr;
           return range;
         } else {
           return CycleRange<Use>();
@@ -282,16 +266,16 @@ namespace egraphs {
       }
       
       size_t hash() const {
-        return hash(data, (Node**)children, child_count);
+        return hash(_data, (Node**)_children, _child_count);
       }
       
-      bool eq(const NodeData& _data, Node** _children, size_t _child_count) const {
-        if (child_count != _child_count || data != _data) {
+      bool eq(const NodeData& data, Node** children, size_t child_count) const {
+        if (_child_count != child_count || _data != data) {
           return false;
         }
         
-        for (size_t it = 0; it < child_count; it++) {
-          if (children[it] != _children[it]) {
+        for (size_t it = 0; it < _child_count; it++) {
+          if (_children[it] != children[it]) {
             return false;
           }
         }
@@ -301,20 +285,38 @@ namespace egraphs {
       
     public:
       
+      const NodeData& data() const { return _data; }
+      
       EClass e_class() { return EClass(this); }
       
-      Node** begin() { return children; }
-      Node** end() { return children + child_count; }
-      size_t size() { return child_count; }
+      Node** begin() { return _children; }
+      Node** end() { return _children + _child_count; }
+      size_t size() { return _child_count; }
       
       Node* at(size_t index) {
-        if (index >= child_count) {
+        if (index >= _child_count) {
           throw_error(Error, "");
         }
-        return children[index];
+        return _children[index];
       }
       
       inline Node* operator[](size_t index) { return at(index); }
+      
+      // Finds the root node in the union find.
+      // Performs path compression.
+      Node* root() {
+        Node* root = this;
+        while (root->_up != nullptr) {
+          root = root->_up;
+        }
+        Node* cur = this;
+        while (cur->_up != nullptr) {
+          Node* old_up = cur->_up;
+          cur->_up = root;
+          cur = old_up;
+        }
+        return root;
+      }
     };
     
   private:
@@ -341,7 +343,7 @@ namespace egraphs {
           if (node->eq(data, children, child_count)) {
             return node;
           }
-          node = node->next_bucket;
+          node = node->_next_bucket;
         }
         return nullptr;
       }
@@ -349,27 +351,27 @@ namespace egraphs {
       // Removes a node from the hashcons.
       // Assumes that the node is currently in the hashcons.
       void erase(Node* node) {
-        assert(node->prev_bucket != nullptr);
+        assert(node->_prev_bucket != nullptr);
         
-        *node->prev_bucket = node->next_bucket;
-        if (node->next_bucket != nullptr) {
-          node->next_bucket->prev_bucket = node->prev_bucket;
+        *node->_prev_bucket = node->_next_bucket;
+        if (node->_next_bucket != nullptr) {
+          node->_next_bucket->_prev_bucket = node->_prev_bucket;
         }
-        node->next_bucket = nullptr;
-        node->prev_bucket = nullptr;
+        node->_next_bucket = nullptr;
+        node->_prev_bucket = nullptr;
       }
       
       // Assumes that node is not currently in the hashcons.
       void insert(Node* node) {
-        assert(node->prev_bucket == nullptr);
+        assert(node->_prev_bucket == nullptr);
         
         size_t hash = node->hash() % _size;
-        node->next_bucket = _data[hash];
+        node->_next_bucket = _data[hash];
         if (_data[hash] != nullptr) {
-          _data[hash]->prev_bucket = &node->next_bucket;
+          _data[hash]->_prev_bucket = &node->_next_bucket;
         }
         _data[hash] = node;
-        node->prev_bucket = &_data[hash];
+        node->_prev_bucket = &_data[hash];
       }
     };
     
@@ -388,13 +390,13 @@ namespace egraphs {
     Node* node(const NodeData& data, Node** children, size_t child_count) {
       // All children must be root nodes
       for (size_t it = 0; it < child_count; it++) {
-        assert(children[it]->up == nullptr);
+        assert(children[it]->_up == nullptr);
       }
       
       // Check if node is already in hashcons
       Node* node = _hashcons.get(data, children, child_count);
       if (node != nullptr) {
-        return node->find();
+        return node->root();
       }
       
       // Node is not in hashcons -> allocate new node
@@ -425,15 +427,15 @@ namespace egraphs {
     }
     
     void merge(Node* a, Node* b) {
-      a = a->find();
-      b = b->find();
+      a = a->root();
+      b = b->root();
       if (a == b) {
         return;
       }
       
       Node* root = b;
       Node* child = a;
-      if (root->rank < child->rank) {
+      if (root->_rank < child->_rank) {
         std::swap(root, child);
       }
       
@@ -445,7 +447,7 @@ namespace egraphs {
         Use* use = uses.first;
         while (true) {
           _hashcons.erase(use->node);
-          use->node->children[use->child_index] = root;
+          use->node->_children[use->child_index] = root;
           _hashcons.insert(use->node);
           
           if (use == uses.last) {
@@ -470,7 +472,7 @@ namespace egraphs {
         
         stream << "subgraph cluster" << ids.at(root) << " {\n";
         for (Node* node : root->e_class()) {
-          stream << "node" << ids.at(node) << " [label=\"" << node->data << "\"]\n";
+          stream << "node" << ids.at(node) << " [label=\"" << node->data() << "\"]\n";
         }
         stream << "}\n";
       }
@@ -479,7 +481,7 @@ namespace egraphs {
         for (Node* node : root->e_class()) {
           for (Node* child : *node) {
             stream << "node" << ids.at(node) << " -> node" << ids.at(child);
-            //stream << " [lhead=cluster" << ids.at(child->find()) << "]";
+            //stream << " [lhead=cluster" << ids.at(child->root()) << "]";
             stream << ";\n";
           }
         }
