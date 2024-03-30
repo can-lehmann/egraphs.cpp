@@ -4,6 +4,7 @@
 #define EGRAPHS_HPP
 
 #include <vector>
+#include <deque>
 #include <unordered_set>
 #include <unordered_map>
 #include <fstream>
@@ -214,6 +215,10 @@ namespace egraphs {
         std::copy(children, children + child_count, _children);
       }
       
+      bool is_in_hashcons() const {
+        return _prev_bucket != nullptr;
+      }
+      
       void insert_uses(Use* uses) {
         if (_uses == nullptr) {
           _uses = uses;
@@ -348,10 +353,14 @@ namespace egraphs {
         return nullptr;
       }
       
+      Node* get(Node* node) {
+        return get(node->_data, node->_children, node->_child_count);
+      }
+      
       // Removes a node from the hashcons.
       // Assumes that the node is currently in the hashcons.
       void erase(Node* node) {
-        assert(node->_prev_bucket != nullptr);
+        assert(node->is_in_hashcons());
         
         *node->_prev_bucket = node->_next_bucket;
         if (node->_next_bucket != nullptr) {
@@ -363,7 +372,7 @@ namespace egraphs {
       
       // Assumes that node is not currently in the hashcons.
       void insert(Node* node) {
-        assert(node->_prev_bucket == nullptr);
+        assert(!node->is_in_hashcons());
         
         size_t hash = node->hash() % _size;
         node->_next_bucket = _data[hash];
@@ -427,35 +436,53 @@ namespace egraphs {
     }
     
     void merge(Node* a, Node* b) {
-      a = a->root();
-      b = b->root();
-      if (a == b) {
-        return;
-      }
-      
-      Node* root = b;
-      Node* child = a;
-      if (root->_rank < child->_rank) {
-        std::swap(root, child);
-      }
-      
-      CycleRange<Use> uses = child->merge_roots(root);
-      _roots.erase(child);
-      
-      // Update users
-      if (!uses.empty()) {
-        Use* use = uses.first;
-        while (true) {
-          _hashcons.erase(use->node);
-          use->node->_children[use->child_index] = root;
-          _hashcons.insert(use->node);
-          
-          if (use == uses.last) {
-            break;
-          }
-          use = use->next;
+      std::deque<std::pair<Node*, Node*>> queue;
+      queue.emplace_back(a, b);
+      merge(queue);
+    }
+    
+    void merge(std::deque<std::pair<Node*, Node*>>& queue) {
+      while (!queue.empty()) {
+        auto [a, b] = queue.front();
+        queue.pop_front();
+        
+        a = a->root();
+        b = b->root();
+        if (a == b) {
+          continue;
         }
         
+        Node* root = b;
+        Node* child = a;
+        if (root->_rank < child->_rank) {
+          std::swap(root, child);
+        }
+        
+        CycleRange<Use> uses = child->merge_roots(root);
+        _roots.erase(child);
+        
+        // Update users
+        if (!uses.empty()) {
+          Use* use = uses.first;
+          while (true) {
+            if (use->node->is_in_hashcons()) {
+              _hashcons.erase(use->node);
+              use->node->_children[use->child_index] = root;
+              Node* other = _hashcons.get(use->node);
+              if (other == nullptr) {
+                _hashcons.insert(use->node);
+              } else {
+                queue.emplace_back(use->node, other);
+              }
+            }
+            
+            if (use == uses.last) {
+              break;
+            }
+            use = use->next;
+          }
+          
+        }
       }
     }
     

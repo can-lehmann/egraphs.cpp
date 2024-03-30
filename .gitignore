@@ -1,0 +1,4 @@
+tests/test_egraph
+examples/boolean_logic
+*.gv
+*.svg
