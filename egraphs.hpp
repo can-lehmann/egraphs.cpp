@@ -91,7 +91,35 @@ namespace egraphs {
     }
   };
   
-  template <class NodeData>
+  template <class NodeKind>
+  class SimpleNodeData {
+  private:
+    NodeKind _kind;
+  public:
+    SimpleNodeData(const NodeKind& kind): _kind(kind) {}
+    
+    NodeKind kind() const { return _kind; }
+    
+    bool operator==(const SimpleNodeData<NodeKind>& other) const {
+      return _kind == other._kind;
+    }
+    
+    bool operator!=(const SimpleNodeData<NodeKind>& other) const {
+      return _kind != other._kind;
+    }
+  };
+  
+}
+
+template <class NodeKind>
+struct std::hash<egraphs::SimpleNodeData<NodeKind>> {
+  size_t operator()(const egraphs::SimpleNodeData<NodeKind>& data) const {
+    return std::hash<NodeKind>()(data.kind());
+  }
+};
+
+namespace egraphs {
+  template <class NodeKind, class NodeData = SimpleNodeData<NodeKind>>
   class EGraph {
   public:
     struct Node;
@@ -182,6 +210,17 @@ namespace egraphs {
         }
       };
       
+      class NodeKindMatcher {
+      private:
+        NodeKind _kind;
+      public:
+        NodeKindMatcher(const NodeKind& kind): _kind(kind) {}
+        
+        bool matches(const Node* node) const {
+          return _kind == node->data().kind();
+        }
+      };
+      
       template <class Matcher>
       class MatchIterator {
       public:
@@ -238,6 +277,9 @@ namespace egraphs {
         
         MatchIterator<Matcher> begin() { return MatchIterator<Matcher>(_e_class.begin(), _matcher); }
         MatchIterator<Matcher> end() { return MatchIterator<Matcher>(_e_class.end(), _matcher); }
+        
+        bool empty() { return begin() == end(); }
+        bool not_empty() { return !empty(); }
       };
     private:
       Node* _root = nullptr;
@@ -252,11 +294,13 @@ namespace egraphs {
       template <class Matcher>
       MatchRange<Matcher> match(const Matcher& matcher) { return MatchRange<Matcher>(*this, matcher); }
       MatchRange<NodeDataMatcher> match(const NodeData& data) { return match(NodeDataMatcher(data)); }
+      MatchRange<NodeKindMatcher> match(const NodeKind& kind) { return match(NodeKindMatcher(kind)); }
+      
     };
     
     class Node {
     private:
-      friend EGraph<NodeData>;
+      friend EGraph<NodeKind, NodeData>;
       
       NodeData _data;
       
@@ -509,6 +553,7 @@ namespace egraphs {
     Node* node(const NodeData& data) {
       return node(data, nullptr, 0);
     }
+    
     
     void merge(Node* a, Node* b) {
       std::deque<std::pair<Node*, Node*>> queue;
