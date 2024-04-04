@@ -5,11 +5,13 @@
 
 #include <vector>
 #include <deque>
+#include <queue>
 #include <unordered_set>
 #include <unordered_map>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <functional>
 #include <utility>
 
 #include <cassert>
@@ -179,26 +181,27 @@ namespace egraphs {
           }
         }
       
-        void skip_to_next_in_hashcons(Down* prev) {
+        void skip_to_next_in_hashcons() {
           while (_current != nullptr && !_current->node->is_in_hashcons()) {
-            if (prev != nullptr) {
-              prev->next = _current->next;
-            }
-            prev = _current;
             next();
           }
         }
       public:
         explicit Iterator(Down* initial, Down* current):
             _initial(initial), _current(current) {
-          skip_to_next_in_hashcons(nullptr);
+          skip_to_next_in_hashcons();
         }
         
         Iterator& operator++() {
           if (_current != nullptr) {
             Down* prev = _current;
             next();
-            skip_to_next_in_hashcons(prev);
+            skip_to_next_in_hashcons();
+            if (_current == nullptr) {
+              prev->next = _initial;
+            } else {
+              prev->next = _current;
+            }
           }
           return *this;
         }
@@ -631,6 +634,158 @@ namespace egraphs {
       return changed;
     }
     
+    // Node cost type used for extraction.
+    // Implements saturating arithmetic.
+    class Cost {
+    private:
+      uint64_t _value = 0;
+    public:
+      Cost() {}
+      Cost(uint64_t value): _value(value) {}
+      
+      static inline Cost inf() {
+        return Cost(~uint64_t(0));
+      } 
+      
+      inline uint64_t value() const { return _value; }
+      inline bool is_inf() const { return *this == Cost::inf(); }
+      
+      inline Cost operator+(const Cost& other) const {
+        uint64_t res = 0;
+        if (__builtin_add_overflow(_value, other._value, &res)) {
+          return Cost::inf();
+        } else {
+          return Cost(res);
+        }
+      }
+      
+      inline Cost& operator+=(const Cost& other) {
+        *this = *this + other;
+        return *this;
+      }
+      
+      #define cmp(op) \
+        inline bool operator op(const Cost& other) const { \
+          return _value op other._value; \
+        }
+      
+      cmp(==)
+      cmp(!=)
+      cmp(<=)
+      cmp(<)
+      cmp(>=)
+      cmp(>)
+      
+      #undef cmp
+    };
+    
+    // Mapping from root nodes to costs
+    using Costs = std::unordered_map<Node*, Cost>;
+    
+    // Cost function for individual nodes.
+    // The resulting cost must be greater than 0 and greater than
+    // the cost of every child of the node.
+    using CostFn = std::function<Cost(Node* node, const Costs& costs)>;
+    
+    // Cost function for node data.
+    // Must return a cost greater than 0.
+    using DataCostFn = std::function<Cost(const NodeData&)>;
+    
+    // Mapping from root nodes to the extracted representatives
+    // from their equivalence class.
+    using Extracted = std::unordered_map<Node*, Node*>;
+    
+    Extracted extract(const CostFn& cost_fn) {
+      // Extraction is performed using dijkstra's algorithm
+      // Starting at the leaf nodes, increasingly high cost nodes
+      // are reached.
+      
+      struct QueueItem {
+        Node* node = nullptr;
+        Cost cost;
+        
+        QueueItem(Node* _node, Cost _cost):
+          node(_node), cost(_cost) {}
+        
+        bool operator<(const QueueItem& other) const {
+          return cost > other.cost;
+        }
+      };
+      
+      Extracted extracted;
+      Costs costs;
+      std::priority_queue<QueueItem> queue;
+      
+      for (Node* root : _roots) {
+        extracted.insert({root, root});
+        costs.insert({root, Cost::inf()});
+      }
+      
+      // Insert leaf nodes
+      for (Node* root : _roots) {
+        for (Node* node : root->e_class()) {
+          if (node->size() == 0) {
+            Cost cost = cost_fn(node, costs);
+            if (cost < costs.at(root)) {
+              queue.push(QueueItem(root, cost));
+              extracted.at(root) = node;
+              costs.at(root) = cost;
+            }
+          }
+        }
+      }
+      
+      while (!queue.empty()) {
+        QueueItem item = queue.top();
+        queue.pop();
+        
+        if (item.cost != costs.at(item.node)) {
+          // Already found a lower cost representative for this equivalence class
+          continue;
+        }
+        
+        if (item.node->_uses != nullptr) {
+          Use* use = item.node->_uses;
+          while (true) {
+            Node* node = use->node;
+            if (node->is_in_hashcons()) {
+              Cost cost = cost_fn(node, costs);
+              assert(cost > item.cost);
+              Node* root = node->root();
+              if (cost < costs.at(root)) {
+                queue.push(QueueItem(root, cost));
+                extracted.at(root) = node;
+                costs.at(root) = cost;
+              }
+            }
+            
+            if (use->next == item.node->_uses) {
+              break;
+            }
+            use = use->next;
+          }
+        }
+      }
+      
+      return extracted;
+    }
+    
+    Extracted extract(const DataCostFn& data_cost) {
+      return extract([&](Node* node, const Costs& costs){
+        Cost cost = data_cost(node->data());
+        for (Node* child : *node) {
+          cost += costs.at(child);
+        }
+        return cost;
+      });
+    }
+    
+    Extracted extract() {
+      return extract([&](const NodeData& data){
+        return 1;
+      });
+    }
+    
     void write_dot(std::ostream& stream) const {
       std::unordered_map<Node*, size_t> ids;
       
@@ -669,6 +824,53 @@ namespace egraphs {
         throw_error(Error, "Failed to open " << path);
       }
       write_dot(stream);
+    }
+    
+    void write_dot(std::ostream& stream,
+                   const Extracted& extracted,
+                   Node* extraction_root) const {
+      std::unordered_map<Node*, size_t> ids;
+      
+      stream << "digraph {\n";
+      stream << "compound=true;\n";
+      
+      extraction_root = extraction_root->root();
+      
+      std::deque<Node*> queue;
+      queue.push_back(extraction_root);
+      ids.insert({extraction_root, ids.size()});
+      
+      while (!queue.empty()) {
+        Node* root = queue.front();
+        queue.pop_front();
+        stream << "node" << ids.at(root) << " [label=\"" << extracted.at(root)->data() << "\"]\n";
+        
+        for (Node* child : *extracted.at(root)) {
+          if (ids.find(child) == ids.end()) {
+            ids.insert({child, ids.size()});
+            queue.push_back(child);
+          }
+        }
+      }
+      
+      for (const auto& [root, id] : ids) {
+        for (Node* child : *extracted.at(root)) {
+          stream << "node" << id << " -> node" << ids.at(child) << ";\n";
+        }
+      }
+      
+      stream << "}";
+    }
+    
+    void save_dot(const char* path,
+                  const Extracted& extracted,
+                  Node* extraction_root) {
+      std::ofstream stream;
+      stream.open(path);
+      if (!stream) {
+        throw_error(Error, "Failed to open " << path);
+      }
+      write_dot(stream, extracted, extraction_root);
     }
     
   };

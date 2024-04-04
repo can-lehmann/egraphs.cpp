@@ -84,9 +84,9 @@ int main() {
   
   EGraph e_graph;
   
-  Node* node = e_graph.node(NodeKind::Not, {
+  Node* extraction_root = e_graph.node(NodeKind::Not, {
     e_graph.node(NodeKind::And, {
-      e_graph.node(NodeData(true)),
+      e_graph.node("x"),
       e_graph.node(NodeKind::Not, {
         e_graph.node("x")
       })
@@ -135,15 +135,19 @@ int main() {
               node->at(1),
               node->at(0)
             }));
-            if (node->at(0)->e_class().match(NodeData(false)).not_empty() ||
-                node->at(1)->e_class().match(NodeData(false)).not_empty()) {
+            if (node->at(0)->e_class().match(NodeData(false)).not_empty()) {
               queue.emplace_back(node, e_graph.node(false));
             }
             if (node->at(0)->e_class().match(NodeData(true)).not_empty()) {
               queue.emplace_back(node, node->at(1));
             }
-            if (node->at(1)->e_class().match(NodeData(true)).not_empty()) {
+            if (node->at(0) == node->at(1)) {
               queue.emplace_back(node, node->at(0));
+            }
+            for (Node* not_node : node->at(0)->e_class().match(NodeKind::Not)) {
+              if (not_node->at(0) == node->at(1)) {
+                queue.emplace_back(node, e_graph.node(false));
+              }
             }
           break;
           case NodeKind::Or:
@@ -151,15 +155,19 @@ int main() {
               node->at(1),
               node->at(0)
             }));
-            if (node->at(0)->e_class().match(NodeData(true)).not_empty() ||
-                node->at(1)->e_class().match(NodeData(true)).not_empty()) {
+            if (node->at(0)->e_class().match(NodeData(true)).not_empty() ) {
               queue.emplace_back(node, e_graph.node(true));
             }
             if (node->at(0)->e_class().match(NodeData(false)).not_empty()) {
               queue.emplace_back(node, node->at(1));
             }
-            if (node->at(1)->e_class().match(NodeData(false)).not_empty()) {
+            if (node->at(0) == node->at(1)) {
               queue.emplace_back(node, node->at(0));
+            }
+            for (Node* not_node : node->at(0)->e_class().match(NodeKind::Not)) {
+              if (not_node->at(0) == node->at(1)) {
+                queue.emplace_back(node, e_graph.node(true));
+              }
             }
           break;
         }
@@ -169,6 +177,9 @@ int main() {
   } while(e_graph.merge(queue));
   
   e_graph.save_dot("graph.gv");
+  
+  EGraph::Extracted extracted = e_graph.extract();
+  e_graph.save_dot("extracted.gv", extracted, extraction_root);
   
   return 0;
 }
