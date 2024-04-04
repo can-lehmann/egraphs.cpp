@@ -165,6 +165,7 @@ int main() {
         }
       }
     }
+    std::cout << queue.size() << std::endl;
   } while(e_graph.merge(queue));
   
   e_graph.save_dot("graph.gv");

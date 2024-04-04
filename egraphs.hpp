@@ -169,15 +169,36 @@ namespace egraphs {
       private:
         Down* _initial = nullptr;
         Down* _current = nullptr;
-      public:
-        explicit Iterator(Down* initial, Down* current):
-          _initial(initial), _current(current) {}
-        
-        Iterator& operator++() {
+      
+        void next() {
+          assert(_current != nullptr);
           if (_current->next == _initial) {
             _current = nullptr;
           } else {
             _current = _current->next;
+          }
+        }
+      
+        void skip_to_next_in_hashcons(Down* prev) {
+          while (_current != nullptr && !_current->node->is_in_hashcons()) {
+            if (prev != nullptr) {
+              prev->next = _current->next;
+            }
+            prev = _current;
+            next();
+          }
+        }
+      public:
+        explicit Iterator(Down* initial, Down* current):
+            _initial(initial), _current(current) {
+          skip_to_next_in_hashcons(nullptr);
+        }
+        
+        Iterator& operator++() {
+          if (_current != nullptr) {
+            Down* prev = _current;
+            next();
+            skip_to_next_in_hashcons(prev);
           }
           return *this;
         }
