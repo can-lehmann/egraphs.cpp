@@ -578,18 +578,44 @@ namespace egraphs {
       return node(data, nullptr, 0);
     }
     
+    // Queue for storing merge operations before they are executed.
+    // Will ignore already merged pairs.
+    class MergeQueue {
+    private:
+      std::deque<std::pair<Node*, Node*>> _queue;
+    public:
+      MergeQueue() {}
+      
+      inline size_t size() const { return _queue.size(); }
+      inline bool empty() const { return _queue.empty(); }
+      
+      std::pair<Node*, Node*> pop() {
+        std::pair<Node*, Node*> pair = _queue.front();
+        _queue.pop_front();
+        return pair;
+      }
+      
+      void merge_roots(Node* a, Node* b) {
+        if (a != b) {
+          _queue.emplace_back(a, b);
+        }
+      }
+      
+      void merge(Node* a, Node* b) {
+        merge_roots(a->root(), b->root());
+      }
+    };
     
     void merge(Node* a, Node* b) {
-      std::deque<std::pair<Node*, Node*>> queue;
-      queue.emplace_back(a, b);
+      MergeQueue queue;
+      queue.merge(a, b);
       merge(queue);
     }
     
-    bool merge(std::deque<std::pair<Node*, Node*>>& queue) {
+    bool merge(MergeQueue& queue) {
       bool changed = false;
       while (!queue.empty()) {
-        auto [a, b] = queue.front();
-        queue.pop_front();
+        auto [a, b] = queue.pop();
         
         a = a->root();
         b = b->root();
@@ -610,6 +636,7 @@ namespace egraphs {
         // Update users
         if (!uses.empty()) {
           Use* use = uses.first;
+          Use* prev = nullptr;
           while (true) {
             if (use->node->is_in_hashcons()) {
               _hashcons.erase(use->node);
@@ -618,8 +645,13 @@ namespace egraphs {
               if (other == nullptr) {
                 _hashcons.insert(use->node);
               } else {
-                queue.emplace_back(use->node, other);
+                queue.merge(use->node, other);
               }
+              
+              if (prev != nullptr) {
+                prev->next = use;
+              }
+              prev = use;
             }
             
             if (use == uses.last) {
@@ -627,7 +659,6 @@ namespace egraphs {
             }
             use = use->next;
           }
-          
         }
       }
       

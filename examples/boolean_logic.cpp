@@ -86,21 +86,21 @@ int main() {
   
   Node* extraction_root = e_graph.node(NodeKind::Not, {
     e_graph.node(NodeKind::And, {
-      e_graph.node("x"),
+      e_graph.node("y"),
       e_graph.node(NodeKind::Not, {
         e_graph.node("x")
       })
     })
   });
   
-  std::deque<std::pair<Node*, Node*>> queue;
+  EGraph::MergeQueue queue;
   do {
     for (Node* root : e_graph.roots()) {
       for (Node* node : root->e_class()) {
         switch (node->data().kind()) {
           case NodeKind::Not:
             for (Node* and_node : node->at(0)->e_class().match(NodeKind::And)) {
-              queue.emplace_back(
+              queue.merge(
                 node,
                 e_graph.node(NodeKind::Or, {
                   e_graph.node(NodeKind::Not, {and_node->at(0)}),
@@ -109,7 +109,7 @@ int main() {
               );
             }
             for (Node* or_node : node->at(0)->e_class().match(NodeKind::Or)) {
-              queue.emplace_back(
+              queue.merge(
                 node,
                 e_graph.node(NodeKind::And, {
                   e_graph.node(NodeKind::Not, {or_node->at(0)}),
@@ -118,55 +118,55 @@ int main() {
               );
             }
             for (Node* not_node : node->at(0)->e_class().match(NodeKind::Not)) {
-              queue.emplace_back(
+              queue.merge(
                 node,
                 not_node->at(0)
               );
             }
             for (Node* constant_node : node->at(0)->e_class().match(NodeKind::Constant)) {
-              queue.emplace_back(
+              queue.merge(
                 node,
                 e_graph.node(!constant_node->data().constant())
               );
             }
           break;
           case NodeKind::And:
-            queue.emplace_back(node, e_graph.node(NodeKind::And, {
+            queue.merge(node, e_graph.node(NodeKind::And, {
               node->at(1),
               node->at(0)
             }));
             if (node->at(0)->e_class().match(NodeData(false)).not_empty()) {
-              queue.emplace_back(node, e_graph.node(false));
+              queue.merge(node, e_graph.node(false));
             }
             if (node->at(0)->e_class().match(NodeData(true)).not_empty()) {
-              queue.emplace_back(node, node->at(1));
+              queue.merge(node, node->at(1));
             }
             if (node->at(0) == node->at(1)) {
-              queue.emplace_back(node, node->at(0));
+              queue.merge(node, node->at(0));
             }
             for (Node* not_node : node->at(0)->e_class().match(NodeKind::Not)) {
               if (not_node->at(0) == node->at(1)) {
-                queue.emplace_back(node, e_graph.node(false));
+                queue.merge(node, e_graph.node(false));
               }
             }
           break;
           case NodeKind::Or:
-            queue.emplace_back(node, e_graph.node(NodeKind::Or, {
+            queue.merge(node, e_graph.node(NodeKind::Or, {
               node->at(1),
               node->at(0)
             }));
             if (node->at(0)->e_class().match(NodeData(true)).not_empty() ) {
-              queue.emplace_back(node, e_graph.node(true));
+              queue.merge(node, e_graph.node(true));
             }
             if (node->at(0)->e_class().match(NodeData(false)).not_empty()) {
-              queue.emplace_back(node, node->at(1));
+              queue.merge(node, node->at(1));
             }
             if (node->at(0) == node->at(1)) {
-              queue.emplace_back(node, node->at(0));
+              queue.merge(node, node->at(0));
             }
             for (Node* not_node : node->at(0)->e_class().match(NodeKind::Not)) {
               if (not_node->at(0) == node->at(1)) {
-                queue.emplace_back(node, e_graph.node(true));
+                queue.merge(node, e_graph.node(true));
               }
             }
           break;
