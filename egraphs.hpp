@@ -131,7 +131,7 @@ namespace egraphs {
   public:
     class EClass {
     public:
-      class iterator {
+      class Iterator {
       public:
         using iterator_category = std::forward_iterator_tag;
         using value_type = Node*;
@@ -142,10 +142,10 @@ namespace egraphs {
         Down* _initial = nullptr;
         Down* _current = nullptr;
       public:
-        explicit iterator(Down* initial, Down* current):
+        explicit Iterator(Down* initial, Down* current):
           _initial(initial), _current(current) {}
         
-        iterator& operator++() {
+        Iterator& operator++() {
           if (_current->next == _initial) {
             _current = nullptr;
           } else {
@@ -154,19 +154,90 @@ namespace egraphs {
           return *this;
         }
         
-        iterator& operator++(int) {
-          iterator old = *this;
+        Iterator& operator++(int) {
+          Iterator old = *this;
           ++(*this);
           return old;
         }
         
-        bool operator==(const iterator& other) const {
+        bool operator==(const Iterator& other) const {
           return _initial == other._initial &&
                  _current == other._current;
         }
         
-        bool operator!=(const iterator& other) const { return !(*this == other); }
+        bool operator!=(const Iterator& other) const { return !(*this == other); }
         Node* operator*() const { return _current->node; }
+      
+        bool at_end() const { return _current == nullptr; }
+      };
+      
+      class NodeDataMatcher {
+      private:
+        NodeData _data;
+      public:
+        NodeDataMatcher(const NodeData& data): _data(data) {}
+        
+        bool matches(const Node* node) const {
+          return _data == node->data();
+        }
+      };
+      
+      template <class Matcher>
+      class MatchIterator {
+      public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = Node*;
+        using difference_type = std::ptrdiff_t;
+        using pointer = Node**;
+        using reference = Node*&;
+      private:
+        Iterator _iterator;
+        Matcher _matcher;
+        
+        void skip_to_next_match() {
+          while (!_iterator.at_end() && !_matcher.matches(*_iterator)) {
+            ++_iterator;
+          }
+        }
+      public:
+        explicit MatchIterator(const Iterator& iterator, const Matcher& matcher):
+            _iterator(iterator), _matcher(matcher) {
+          skip_to_next_match();
+        }
+        
+        MatchIterator<Matcher>& operator++() {
+          if (!_iterator.at_end()) {
+            ++_iterator;
+            skip_to_next_match();
+          }
+          return *this;
+        }
+        
+        MatchIterator<Matcher>& operator++(int) {
+          MatchIterator<Matcher> old = *this;
+          ++(*this);
+          return old;
+        }
+        
+        bool operator==(const MatchIterator<Matcher>& other) const {
+          return _iterator == other._iterator;
+        }
+        
+        bool operator!=(const MatchIterator<Matcher>& other) const { return !(*this == other); }
+        Node* operator*() const { return *_iterator; }
+      };
+      
+      template <class Matcher>
+      class MatchRange {
+      private:
+        EClass _e_class;
+        Matcher _matcher;
+      public:
+        MatchRange(const EClass& e_class, const Matcher& matcher):
+          _e_class(e_class), _matcher(matcher) {}
+        
+        MatchIterator<Matcher> begin() { return MatchIterator<Matcher>(_e_class.begin(), _matcher); }
+        MatchIterator<Matcher> end() { return MatchIterator<Matcher>(_e_class.end(), _matcher); }
       };
     private:
       Node* _root = nullptr;
@@ -175,8 +246,12 @@ namespace egraphs {
       
       const Node* root() const { return _root; }
       
-      iterator begin() { return iterator(_root->_down, _root->_down); }
-      iterator end() { return iterator(_root->_down, nullptr); }
+      Iterator begin() { return Iterator(_root->_down, _root->_down); }
+      Iterator end() { return Iterator(_root->_down, nullptr); }
+      
+      template <class Matcher>
+      MatchRange<Matcher> match(const Matcher& matcher) { return MatchRange<Matcher>(*this, matcher); }
+      MatchRange<NodeDataMatcher> match(const NodeData& data) { return match(NodeDataMatcher(data)); }
     };
     
     class Node {
@@ -441,7 +516,8 @@ namespace egraphs {
       merge(queue);
     }
     
-    void merge(std::deque<std::pair<Node*, Node*>>& queue) {
+    bool merge(std::deque<std::pair<Node*, Node*>>& queue) {
+      bool changed = false;
       while (!queue.empty()) {
         auto [a, b] = queue.front();
         queue.pop_front();
@@ -459,6 +535,7 @@ namespace egraphs {
         }
         
         CycleRange<Use> uses = child->merge_roots(root);
+        changed = true;
         _roots.erase(child);
         
         // Update users
@@ -484,6 +561,8 @@ namespace egraphs {
           
         }
       }
+      
+      return changed;
     }
     
     void write_dot(std::ostream& stream) const {
