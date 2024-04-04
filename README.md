@@ -2,6 +2,10 @@
 
 An E-Graph implementation in C++.
 
+## References
+
+- Max Willsey et al. “egg: Fast and extensible equality saturation”. In: Proc. ACM Program. Lang. 5. POPL (Jan. 2021)
+
 ## License
 
 Copyright 2024 Can Joshua Lehmann
